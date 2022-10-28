@@ -13,7 +13,8 @@ import numpy as np
 import scipy.sparse as sp
 from dgl import DGLGraph
 
-#adapted from geom-gcn
+
+# adapted from geom-gcn
 
 def parse_index_file(filename):
     """Parse index file."""
@@ -29,6 +30,7 @@ def sample_mask(idx, l):
     mask[idx] = 1
     return np.array(mask, dtype=np.bool)
 
+
 ################ from GCNII/Geom-GCN (with bugs fixed) ###############################################################################################################
 def full_load_citation(dataset_str):
     names = ['x', 'y', 'tx', 'ty', 'allx', 'ally', 'graph']
@@ -43,16 +45,16 @@ def full_load_citation(dataset_str):
     x, y, tx, ty, allx, ally, graph = tuple(objects)
     test_idx_reorder = parse_index_file("data/ind.{}.test.index".format(dataset_str))
     test_idx_range = np.sort(test_idx_reorder)
-    test_idx_range_full = range(min(test_idx_reorder), max(test_idx_reorder)+1)
+    test_idx_range_full = range(min(test_idx_reorder), max(test_idx_reorder) + 1)
     tx_extended = sp.lil_matrix((len(test_idx_range_full), x.shape[1]))
     if len(test_idx_range_full) != len(test_idx_range):
         # Fix citeseer dataset (there are some isolated nodes in the graph)
         # Find isolated nodes, add them as zero-vecs into the right position, mark them
         # Follow H2GCN code
-        tx_extended[test_idx_range-min(test_idx_range), :] = tx
+        tx_extended[test_idx_range - min(test_idx_range), :] = tx
         tx = tx_extended
         ty_extended = np.zeros((len(test_idx_range_full), y.shape[1]))
-        ty_extended[test_idx_range-min(test_idx_range), :] = ty
+        ty_extended[test_idx_range - min(test_idx_range), :] = ty
         ty = ty_extended
         non_valid_samples = set(test_idx_range_full) - set(test_idx_range)
     else:
@@ -63,7 +65,7 @@ def full_load_citation(dataset_str):
 
     labels = np.vstack((ally, ty))
     labels[test_idx_reorder, :] = labels[test_idx_range, :]
-    
+
     ############### Follow H2GCN and fix the bug ##############
     non_valid_samples = non_valid_samples.union(set(list(np.where(labels.sum(1) == 0)[0])))
     return adj, features, labels, non_valid_samples
@@ -72,16 +74,18 @@ def full_load_citation(dataset_str):
 def preprocess_features(features):
     """Row-normalize feature matrix and convert to tuple representation"""
     rowsum = np.array(features.sum(1))
-    rowsum = (rowsum==0)*1+rowsum
+    rowsum = (rowsum == 0) * 1 + rowsum
     r_inv = np.power(rowsum, -1).flatten()
     r_inv[np.isinf(r_inv)] = 0.
     r_mat_inv = sp.diags(r_inv)
     features = r_mat_inv.dot(features)
     return features
 
+
 ####### codes from the original GeomGCN git repo #################
 def process_geom(G, dataset_name, embedding_method):
-    embedding_file_path = os.path.join('structural_neighborhood', "outf_nodes_space_relation_{}_{}.txt".format(dataset_name, embedding_method))
+    embedding_file_path = os.path.join('structural_neighborhood',
+                                       "outf_nodes_space_relation_{}_{}.txt".format(dataset_name, embedding_method))
     space_and_relation_type_to_idx_dict = {}
 
     with open(embedding_file_path) as embedding_file:
@@ -108,7 +112,7 @@ def process_geom(G, dataset_name, embedding_method):
     g = DGLGraph(adj)
     for u, v, feature in G.edges(data='subgraph_idx'):
         g.edges[g.edge_id(u, v)].data['subgraph_idx'] = th.tensor([feature])
-    
+
     degs = g.in_degrees().float()
     norm = th.pow(degs, -0.5)
     norm[th.isinf(norm)] = 0
@@ -116,7 +120,8 @@ def process_geom(G, dataset_name, embedding_method):
     return g
 
 
-def full_load_data(dataset_name, splits_file_path=None, use_raw_normalize=False, model_type=None, embedding_method=None, get_degree=False):
+def full_load_data(dataset_name, splits_file_path=None, use_raw_normalize=False, model_type=None, embedding_method=None,
+                   get_degree=False):
     if dataset_name in {'cora', 'citeseer', 'pubmed'}:
         adj, features, labels, non_valid_samples = full_load_citation(dataset_name)
         labels = np.argmax(labels, axis=-1)
@@ -130,7 +135,7 @@ def full_load_data(dataset_name, splits_file_path=None, use_raw_normalize=False,
         G = nx.DiGraph()
         graph_node_features_dict = {}
         graph_labels_dict = {}
-        
+
         if dataset_name == 'film':
             with open(graph_node_features_and_labels_file_path) as graph_node_features_and_labels_file:
                 graph_node_features_and_labels_file.readline()
@@ -181,21 +186,21 @@ def full_load_data(dataset_name, splits_file_path=None, use_raw_normalize=False,
     else:
         deg_vec = None
         raw_adj = None
-    if model_type=='GEOMGCN':
+    if model_type == 'GEOMGCN':
         g = process_geom(G, dataset_name, embedding_method)
     else:
         g = adj
         if use_raw_normalize:
-                g = row_normalized_adjacency(g)
+            g = row_normalized_adjacency(g)
         else:
             g = sys_normalized_adjacency(g)
         g = sparse_mx_to_torch_sparse_tensor(g, model_type)
-    
+
     with np.load(splits_file_path) as splits_file:
         train_mask = splits_file['train_mask']
         val_mask = splits_file['val_mask']
         test_mask = splits_file['test_mask']
-    
+
     #################### remove the nodes that the label vectors are all zeros, they aren't assigned to any class ############
     if dataset_name in {'cora', 'citeseer', 'pubmed'}:
         for n_i in non_valid_samples:
@@ -205,11 +210,11 @@ def full_load_data(dataset_name, splits_file_path=None, use_raw_normalize=False,
                 test_mask[n_i] = False
             elif val_mask[n_i]:
                 val_mask[n_i] = False
-    
+
     num_features = features.shape[1]
     num_labels = len(np.unique(labels))
     assert (np.array_equal(np.unique(labels), np.arange(len(np.unique(labels)))))
-    
+
     # pi_avg = []
     # for i in range(num_labels):
     #     num_i = np.sum(labels==i)
@@ -226,5 +231,3 @@ def full_load_data(dataset_name, splits_file_path=None, use_raw_normalize=False,
     test_mask = th.BoolTensor(test_mask)
 
     return g, features, labels, train_mask, val_mask, test_mask, num_features, num_labels, deg_vec, raw_adj
-
-
