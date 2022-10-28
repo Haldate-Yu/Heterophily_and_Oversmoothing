@@ -1,6 +1,8 @@
 # Heterophily and Oversmoothing
 Codes for the paper "Two Sides of the Same Coin: Heterophily and Oversmoothing in Graph Convolutional Neural Networks", which is accepted to The IEEE International Conference on Data Mining (ICDM 2022). [ https://arxiv.org/abs/2102.06462 ]
 
+
+
 ## To run the code
 ### Environment
 
@@ -67,6 +69,21 @@ bash table_1_GCN_ectd.sh 2
 ```
 
 with a topk value set to 2, then you will get the result of CTD-GCN[topk=2]. In particular, when you do not enter the topk value, it will be set to 2 by default.
+
+### Some Results
+#### Table 1
+
+![](./imgs/table1.png)
+
+#### Table 2
+
+![](./imgs/table2.png)
+
+#### Table B1
+
+![](./imgs/tableb1.png)
+
+------
 
 ## Cite:
 
