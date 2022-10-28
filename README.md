@@ -1,7 +1,5 @@
 # Heterophily and Oversmoothing
-Codes for the paper "Two Sides of the Same Coin: Heterophily and Oversmoothing in Graph Convolutional Neural Networks", which is accepted to The IEEE International Conference on Data Mining (ICDM 2022).
-
-[Heterophily and Oversmoothing]: https://arxiv.org/abs/2102.06462
+Codes for the paper "Two Sides of the Same Coin: Heterophily and Oversmoothing in Graph Convolutional Neural Networks", which is accepted to The IEEE International Conference on Data Mining (ICDM 2022). [Heterophily and Oversmoothing]: https://arxiv.org/abs/2102.06462
 
 ## To run the code
 ### Environment
