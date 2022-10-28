@@ -391,10 +391,20 @@ def cal_mfpt(args, adj, topk):
         mfpt = AFT + AFT.T
         mfpt = np.power(mfpt, -1.)
         mfpt[np.isinf(mfpt)] = 0.
-        mfpt[mfpt < 0] = 1.
+        
         np.save(file, mfpt)
 
+    # strict rules
+    mfpt[mfpt < 0] = 0.
+    # soft rules
+    # mfpt[mfpt < 0] = 1.
+    # use topo only
+    # mfpt = np.where(mfpt > 0, 1., 0.)
+    # topk filter
     mfpt = np.apply_along_axis(get_topk_matrix, 1, mfpt, k=topk)
+    # self loops
+    mfpt += np.eye(mfpt.shape[0])
+    
     mfpt = sp.coo_matrix(mfpt).tocoo().astype(np.float32)
     indices = torch.from_numpy(
         np.vstack((mfpt.row, mfpt.col)).astype(np.int64))
