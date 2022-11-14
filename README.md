@@ -42,6 +42,7 @@ For all benchmarks, we use the feature vectors, class labels and 10 random split
 * Geom-GCN
 * GPRGNN
 * DeepGCN(with PairNorm)
+* GCNII
 * GGCN
 * MLP
 
