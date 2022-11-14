@@ -35,7 +35,16 @@ If you do **not** need to run GeomGCN baseline, you can install **any version of
 For all benchmarks, we use the feature vectors, class labels and 10 random splits(48%/32%/20% of nodes per class for train/valid/test). 
 
 ------
+### Models
+* GCN
+* GAT
+* UGNN
+* Geom-GCN
+* GPRGNN
+* DeepGCN(with PairNorm)
+* GGCN
 
+------
 ### Experiments
 
 #### Experiments in origin paper
