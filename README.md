@@ -43,6 +43,7 @@ For all benchmarks, we use the feature vectors, class labels and 10 random split
 * GPRGNN
 * DeepGCN(with PairNorm)
 * GGCN
+* MLP
 
 ------
 ### Experiments
