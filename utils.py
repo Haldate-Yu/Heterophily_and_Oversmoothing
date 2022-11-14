@@ -1,6 +1,8 @@
 import os
 import time
 
+# import dgl
+import scipy
 import numpy as np
 import scipy.sparse as sp
 import torch
@@ -12,6 +14,7 @@ import json
 from networkx.readwrite import json_graph
 import pdb
 from torch_sparse import coalesce
+from sklearn.neighbors import kneighbors_graph
 
 sys.setrecursionlimit(99999)
 
@@ -32,6 +35,16 @@ def normalize(mx):
     r_mat_inv = sp.diags(r_inv)
     mx = r_mat_inv.dot(mx)
     return mx
+
+
+def softmax_normalized_adjacency(adj):
+    # adj = sp.coo_matrix(adj)
+    # adj = adj + sp.eye(adj.shape[0])
+    # print(adj, type(adj))
+    adj = np.where(adj > 0., adj, -9e15)
+    adj -= np.max(adj, axis=1, keepdims=True)
+    adj_normalized = np.exp(adj) / np.sum(np.exp(adj), axis=1, keepdims=True)
+    return sp.coo_matrix(adj_normalized)
 
 
 def row_normalized_adjacency(adj):
@@ -364,6 +377,12 @@ def load_ppi():
     return train_adj_list, val_adj_list, test_adj_list, train_feat, val_feat, test_feat, train_labels, val_labels, test_labels, train_nodes, val_nodes, test_nodes
 
 
+def cal_knn(features):
+    knn_graph = kneighbors_graph(features.numpy(), n_neighbors=5, metric='cosine')
+    # knn_edge_index = knn_graph(features, k=2, loop=False, cosine=True)
+    return knn_graph.toarray()
+
+
 def cal_mfpt(args, adj, topk):
     os.makedirs('./pinv-dataset', exist_ok=True)
     file = './pinv-dataset/{}.npy'.format(args.data)
@@ -381,7 +400,8 @@ def cal_mfpt(args, adj, topk):
         d_inv_sqrt = np.power(deg, -0.5)
         d_inv_sqrt[np.isinf(d_inv_sqrt)] = 0.
         lap = np.identity(nnodes) - d_inv_sqrt.dot(adj).dot(d_inv_sqrt)
-        lap_pinv = np.linalg.pinv(lap)
+        # lap_pinv = np.linalg.pinv(lap)
+        lap_pinv = scipy.linalg.pinvh(lap)
 
         volG = deg.sum().sum()
         tmp = lap_pinv @ deg @ np.ones((nnodes, 1))
@@ -391,44 +411,62 @@ def cal_mfpt(args, adj, topk):
         mfpt = AFT + AFT.T
         mfpt = np.power(mfpt, -1.)
         mfpt[np.isinf(mfpt)] = 0.
-        
+        # mfpt[mfpt < 0] = 1.
         np.save(file, mfpt)
 
     # strict rules
-    mfpt[mfpt < 0] = 0.
+    mfpt[mfpt < 0.] = 0.
     # soft rules
-    # mfpt[mfpt < 0] = 1.
-    # use topo only
-    # mfpt = np.where(mfpt > 0, 1., 0.)
+    # mfpt[mfpt < 0.] = 1.
+    
     # topk filter
     mfpt = np.apply_along_axis(get_topk_matrix, 1, mfpt, k=topk)
+    # thres filter
+    # mfpt[mfpt < topk] = 0.
+    # use topo only
+    mfpt = np.where(mfpt > 0., 1., 0.)
+    # adj filter
+    # adj = adj.to_dense().numpy()
+    # adj = sp.csr_matrix(adj)
+    # adj = (adj + sp.eye(adj.shape[0])).toarray()
+    # mfpt = np.where(adj <= 0., 0., mfpt)
+
+    return mfpt
+
     # self loops
-    mfpt += np.eye(mfpt.shape[0])
-    
-    mfpt = sp.coo_matrix(mfpt).tocoo().astype(np.float32)
-    indices = torch.from_numpy(
-        np.vstack((mfpt.row, mfpt.col)).astype(np.int64))
-    values = torch.from_numpy(mfpt.data)
-    shape = torch.Size(mfpt.shape)
-    return torch.sparse.FloatTensor(indices, values, shape)
+    # mfpt += np.eye(mfpt.shape[0])
+    # normalize adj
+    # row_sum = mfpt.sum(1)
+    # row_sum - (row_sum == 0) * 1 + row_sum
+    # deg_mfpt = np.diag(row_sum)
+    # d_inv_sqrt_mfpt = np.power(deg_mfpt, -0.5)
+    # d_inv_sqrt_mfpt[np.isinf(d_inv_sqrt_mfpt)] = 0.
+    # mfpt = d_inv_sqrt_mfpt.dot(mfpt).dot(d_inv_sqrt_mfpt)
+
+    # return mfpt
+    # mfpt = sp.coo_matrix(mfpt).tocoo().astype(np.float32)
+    # indices = torch.from_numpy(
+    #     np.vstack((mfpt.row, mfpt.col)).astype(np.int64))
+    # values = torch.from_numpy(mfpt.data)
+    # shape = torch.Size(mfpt.shape)
+    # return torch.sparse.FloatTensor(indices, values, shape)
 
 
 def logger(args, acc_list, t_total):
     os.makedirs('./results', exist_ok=True)
     file = './results/{}.txt'.format(args.model)
 
-    summary_1 = 'dataset={}, hidden={}, layer={}, lr={}, wd={}' \
+    summary_1 = '\ndataset={}, hidden={}, layer={}, lr={}, wd={}' \
         .format(args.data, args.hidden, args.layer, args.lr, args.weight_decay)
 
     if args.pinv is True:
         summary_1 += ' ECTD topk={}'.format(args.topk)
-
+        
     train_cost = time.time() - t_total
     test_acc = np.mean(acc_list)
     test_std = np.std(acc_list)
-
-    summary_2 = 'Train cost: {:.4f}s, Test acc.:{:.2f}, Test std.:{:.2f}' \
-        .format(train_cost, test_acc, test_std)
+    summary_2 = 'Train cost: {:.4f}s, Test acc.:{:.2f}, Test std.:{:.2f}, Final Results: {:.2f} ± {:.2f}' \
+        .format(train_cost, test_acc, test_std, test_acc, test_std)
 
     with open(file, 'a+') as f:
         f.write('{}: {}\n{}: {}\n{}\n'.format(

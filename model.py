@@ -69,8 +69,7 @@ class GCN(nn.Module):
         return F.log_softmax(x, dim=1)
 
 
-# -------------------------------------------------------------------------------------------GCNII------------------------------------------------------------------------------------
-
+# -------------------------------------------------------------------------------------------GCNII------------------------------------------------------------
 class GraphConvolution(nn.Module):
 
     def __init__(self, in_features, out_features, residual=False, variant=False):
@@ -162,7 +161,7 @@ class GCNIIppi(nn.Module):
         return layer_inner
 
 
-##------------------------------------------------------------------------------pair norm--------------------------------------------------------------------
+# ------------------------------------------------------------------------------pair norm--------------------------------------------------------------------
 class GraphConv(nn.Module):
     def __init__(self, in_features, out_features, bias=True):
         super(GraphConv, self).__init__()
@@ -568,8 +567,56 @@ class GAT(nn.Module):
         return F.log_softmax(x, dim=1)
 
 
-# -------------------------------------------------------------------------------------------MLP------------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------------UGNN------------------------------------------------------------------------------------
+class CombineAttention(nn.Module):
+    def __init__(self, in_size, hidden_size=16):
+        super(CombineAttention, self).__init__()
 
+        self.project = nn.Sequential(
+            nn.Linear(in_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, 1, bias=False)
+        )
+
+    def forward(self, stacked_emb):
+        combined_attn = self.project(stacked_emb)
+        norm_attn_score = torch.softmax(combined_attn, dim=1)
+        return (norm_attn_score * stacked_emb).sum(1), norm_attn_score
+
+
+class UGNN(nn.Module):
+    def __init__(self, nfeat, nhid1, nhid2, nlayers, nclass, dropout, alpha, nheads, use_sparse=False):
+        super(UGNN, self).__init__()
+
+        # add GATLayers * 3
+        self.UGAT1 = GAT(nfeat=nfeat, nlayers=nlayers, nhid=nhid1, nclass=nhid2, dropout=dropout, alpha=alpha,
+                         nheads=nheads, use_sparse=use_sparse)
+        self.UGAT2 = GAT(nfeat=nfeat, nlayers=nlayers, nhid=nhid1, nclass=nhid2, dropout=dropout, alpha=alpha,
+                         nheads=nheads, use_sparse=use_sparse)
+        self.UGAT3 = GAT(nfeat=nfeat, nlayers=nlayers, nhid=nhid1, nclass=nhid2, dropout=dropout, alpha=alpha,
+                         nheads=nheads, use_sparse=use_sparse)
+
+        self.dropout = dropout
+        self.a = nn.Parameter(torch.zeros(size=(nhid2, 1)))
+        nn.init.xavier_uniform_(self.a.data, gain=1.414)
+        self.attention = CombineAttention(nhid2)
+
+        self.MLP = nn.Sequential(
+            nn.Linear(nhid2, nclass),
+            nn.LogSoftmax(dim=1)
+        )
+
+    def forward(self, x, ori_adj, adj2, knn_adj):
+        emb1 = self.UGAT1(x, ori_adj)
+        emb2 = self.UGAT2(x, adj2)
+        emb3 = self.UGAT3(x, knn_adj)
+
+        emb_comb = torch.stack([emb1, emb2, emb3], dim=1)
+        emb_comb, attn_score = self.attention(emb_comb)
+
+        return emb_comb # self.MLP(emb_comb)
+
+# -------------------------------------------------------------------------------------------MLP------------------------------------------------------------------------------------
 class MLP(nn.Module):
     def __init__(self, nfeat, nlayers, nhidden, nclass, dropout, use_res):
         super(MLP, self).__init__()

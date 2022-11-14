@@ -179,10 +179,13 @@ def full_load_data(dataset_name, splits_file_path=None, use_raw_normalize=False,
         labels = np.array(
             [label for _, label in sorted(G.nodes(data='label'), key=lambda x: x[0])])
     features = preprocess_features(features)
+
+    ori_adj = sparse_mx_to_torch_sparse_tensor(adj, model_type)
+
     if get_degree:
         deg_vec = np.array(adj.sum(1))
         deg_vec = deg_vec.flatten()
-        raw_adj = sparse_mx_to_torch_sparse_tensor(adj)
+        raw_adj = sparse_mx_to_torch_sparse_tensor(adj, model_type)
     else:
         deg_vec = None
         raw_adj = None
@@ -230,4 +233,4 @@ def full_load_data(dataset_name, splits_file_path=None, use_raw_normalize=False,
     val_mask = th.BoolTensor(val_mask)
     test_mask = th.BoolTensor(test_mask)
 
-    return g, features, labels, train_mask, val_mask, test_mask, num_features, num_labels, deg_vec, raw_adj
+    return g, features, labels, train_mask, val_mask, test_mask, num_features, num_labels, deg_vec, raw_adj, ori_adj

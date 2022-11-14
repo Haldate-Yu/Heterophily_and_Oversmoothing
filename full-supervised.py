@@ -24,6 +24,7 @@ parser.add_argument('--lr', type=float, default=0.01, help='learning rate.')
 parser.add_argument('--weight_decay', type=float, default=0.01, help='weight decay (L2 loss on parameters).')
 parser.add_argument('--layer', type=int, default=2, help='Number of layers.')
 parser.add_argument('--hidden', type=int, default=64, help='hidden dimensions.')
+parser.add_argument('--hidden_comb', type=int, default=16, help='hidden dimensions for combined embedding in UGNN.')
 parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate (1 - keep probability).')
 
 parser.add_argument('--dprate_GPRGNN', type=float, default=0.5, help='Dprate for GPRGNN.')
@@ -82,6 +83,7 @@ parser.add_argument('--emb', type=str, default='poincare',
 ################# ECTD parameters#########################################################################
 parser.add_argument('--pinv', action='store_true', default=False, help='using ectd')
 parser.add_argument('--topk', type=int, default=2, help='Number of ectd neighbors.')
+# parser.add_argument('--topk', type=float, default=0.1, help='Threshold of ectd neighbors.')
 args = parser.parse_args()
 random.seed(args.seed)
 np.random.seed(args.seed)
@@ -91,6 +93,7 @@ torch.cuda.manual_seed(args.seed)
 cudaid = "cuda:" + str(args.dev)
 device = torch.device(cudaid if torch.cuda.is_available() else "cpu")
 current_time = time.strftime("%d_%H_%M_%S", time.localtime(time.time()))
+os.makedirs('./pretrained', exist_ok=True)
 checkpt_file = 'pretrained/' + "{}_{}_{}".format(args.model, args.data, current_time) + '.pt'
 print(cudaid, checkpt_file)
 
@@ -152,6 +155,20 @@ def train_step(model, optimizer, features, labels, adj, idx_train, use_geom):
     return loss_train.item(), acc_train.item()
 
 
+def train_step_uni(model, optimizer, features, labels, adj, adj2, adj_knn, idx_train, use_geom):
+    model.train()
+    optimizer.zero_grad()
+    if use_geom:
+        output = model(features)
+    else:
+        output = model(features, adj, adj2, adj_knn)
+    acc_train = accuracy(output[idx_train], labels[idx_train].to(device))
+    loss_train = F.nll_loss(output[idx_train], labels[idx_train].to(device))
+    loss_train.backward()
+    optimizer.step()
+    return loss_train.item(), acc_train.item()
+
+
 def validate_step(model, features, labels, adj, idx_val, use_geom):
     model.eval()
     with torch.no_grad():
@@ -159,6 +176,18 @@ def validate_step(model, features, labels, adj, idx_val, use_geom):
             output = model(features)
         else:
             output = model(features, adj)
+        loss_val = F.nll_loss(output[idx_val], labels[idx_val].to(device))
+        acc_val = accuracy(output[idx_val], labels[idx_val].to(device))
+        return loss_val.item(), acc_val.item()
+
+
+def validate_step_uni(model, features, labels, adj, adj2, adj_knn, idx_val, use_geom):
+    model.eval()
+    with torch.no_grad():
+        if use_geom:
+            output = model(features)
+        else:
+            output = model(features, adj, adj2, adj_knn)
         loss_val = F.nll_loss(output[idx_val], labels[idx_val].to(device))
         acc_val = accuracy(output[idx_val], labels[idx_val].to(device))
         return loss_val.item(), acc_val.item()
@@ -184,16 +213,85 @@ def test_step(model, features, labels, adj, idx_test, use_geom, deg_vec, raw_adj
         return loss_test.item(), acc_test.item(), [acc_deg, h_deg, h_deg_ori]
 
 
+def test_step_uni(model, features, labels, adj, adj2, adj_knn, idx_test, use_geom, deg_vec, raw_adj):
+    model.load_state_dict(torch.load(checkpt_file))
+    model.eval()
+    with torch.no_grad():
+        if use_geom:
+            output = model(features)
+        else:
+            output = model(features, adj, adj2, adj_knn)
+        loss_test = F.nll_loss(output[idx_test], labels[idx_test].to(device))
+        acc_test = accuracy(output[idx_test], labels[idx_test].to(device))
+        if deg_vec is not None:
+            out_last2 = model(features, adj, True)
+            acc_deg, h_deg, h_deg_ori = get_acc_h_dist(output, out_last2, labels, deg_vec, idx_test, raw_adj)
+        else:
+            acc_deg = None
+            h_deg = None
+            h_deg_ori = None
+        return loss_test.item(), acc_test.item(), [acc_deg, h_deg, h_deg_ori]
+
+
 def train(datastr, splitstr):
     use_geom = (args.model == 'GEOMGCN')
     get_degree = (args.get_degree) & (args.model == "GCN")
-    adj, features, labels, idx_train, idx_val, idx_test, num_features, num_labels, deg_vec, raw_adj = full_load_data(
+    adj, features, labels, idx_train, idx_val, idx_test, num_features, num_labels, deg_vec, raw_adj, ori_adj = full_load_data(
         datastr, splitstr, args.row_normalized_adj, model_type=args.model, embedding_method=args.emb,
         get_degree=get_degree)
     if args.pinv is True:
-        adj = cal_mfpt(args, adj, args.topk)
+        adj_ectd = cal_mfpt(args, ori_adj, args.topk)
+        adj_knn = cal_knn(features)
+
+        # ----- adjacency matrix addition ----- #
+        # percent add
+        # s * a1 + (1 - s) * a2
+        # s = 0.9
+        # adj = s * adj_ectd + (1 - s) * adj.to_dense().numpy()
+        # lambda combine
+        # threshold = 0.1
+        # lamda = 1.0
+        # adj = adj.to_dense().numpy()
+        # adj[adj < threshold] = 0.
+        # adj = adj + lamda * adj_ectd
+        # print(adj)
+        # adj = adj_ectd
+
+        # self loops
+        # adj += np.eye(adj.shape[0])
+        # norm
+        # adj = sys_normalized_adjacency(adj).astype(np.float32)
+        # adj = row_normalized_adjacency(adj).astype(np.float32)
+        # adj = softmax_normalized_adjacency(adj).astype(np.float32)
+
+        # indices = torch.from_numpy(
+        #     np.vstack((adj.row, adj.col)).astype(np.int64))
+        # values = torch.from_numpy(adj.data)
+        # shape = torch.Size(adj.shape)
+        # adj = torch.sparse.FloatTensor(indices, values, shape)
+
+        # ----- separate matrix ----- #
+        adj_ectd = row_normalized_adjacency(adj_ectd)
+        indices = torch.from_numpy(
+            np.vstack((adj_ectd.row, adj_ectd.col)).astype(np.int64))
+        values = torch.from_numpy(adj_ectd.data)
+        shape = torch.Size(adj_ectd.shape)
+        adj_ectd = torch.sparse.FloatTensor(indices, values, shape)
+
+        adj_knn = row_normalized_adjacency(adj_knn)
+        indices = torch.from_numpy(
+            np.vstack((adj_knn.row, adj_knn.col)).astype(np.int64))
+        values = torch.from_numpy(adj_knn.data)
+        shape = torch.Size(adj_knn.shape)
+        adj_knn = torch.sparse.FloatTensor(indices, values, shape)
+
     features = features.to(device)
     adj = adj.to(device)
+
+    if args.pinv is True:
+        adj_ectd = adj_ectd.to(device)
+        adj_knn = adj_knn.to(device)
+
     if args.model == "GCN":
         model = GCN(nfeat=features.shape[1],
                     nlayers=args.layer,
@@ -219,6 +317,19 @@ def train(datastr, splitstr):
                     nheads=args.nb_heads, use_sparse=args.use_sparse).to(device)
         if not args.use_sparse:
             adj = adj.to_dense()
+    elif args.model == "UGNN":
+        model = UGNN(nfeat=features.shape[1],
+                     nlayers=args.layer,
+                     nhid1=args.hidden,
+                     nhid2=args.hidden_comb,
+                     nclass=num_labels,
+                     dropout=args.dropout,
+                     alpha=args.alpha_relu,
+                     nheads=args.nb_heads, use_sparse=args.use_sparse).to(device)
+        if not args.use_sparse:
+            adj = adj.to_dense()
+            adj_ectd = adj_ectd.to_dense()
+            adj_knn = adj_knn.to_dense()
     elif args.model == "PN":
         model = DeepGCN(nfeat=features.shape[1], nhid=args.hidden, nclass=num_labels, dropout=args.dropout,
                         nlayer=args.layer, norm_mode="PN").to(device)
@@ -264,9 +375,13 @@ def train(datastr, splitstr):
     bad_counter = 0
     best = 999999999
     for epoch in range(args.epochs):
-        loss_tra, acc_tra = train_step(model, optimizer, features, labels, adj, idx_train, use_geom)
-        loss_val, acc_val = validate_step(model, features, labels, adj, idx_val, use_geom)
-        if (epoch + 1) % 1 == 0:
+        if args.model == 'UGNN':
+            loss_tra, acc_tra = train_step_uni(model, optimizer, features, labels, adj, adj_ectd, adj_knn, idx_train, use_geom)
+            loss_val, acc_val = validate_step_uni(model, features, labels, adj, adj_ectd, adj_knn, idx_val, use_geom)
+        else:
+            loss_tra, acc_tra = train_step(model, optimizer, features, labels, adj, idx_train, use_geom)
+            loss_val, acc_val = validate_step(model, features, labels, adj, idx_val, use_geom)
+        if (epoch + 1) % 100 == 0:
             print('Epoch:{:04d}'.format(epoch + 1),
                   'train',
                   'loss:{:.3f}'.format(loss_tra),
@@ -284,7 +399,10 @@ def train(datastr, splitstr):
         if bad_counter == args.patience:
             break
 
-    test_res = test_step(model, features, labels, adj, idx_test, use_geom, deg_vec, raw_adj)
+    if args.model == 'UGNN':
+        test_res = test_step_uni(model, features, labels, adj, adj_ectd, adj_knn, idx_test, use_geom, deg_vec, raw_adj)
+    else:
+        test_res = test_step(model, features, labels, adj, idx_test, use_geom, deg_vec, raw_adj)
     acc = test_res[1]
     acc_deg, h_deg, h_deg_ori = test_res[-1]
     return acc * 100, acc_deg, h_deg, h_deg_ori
