@@ -377,9 +377,24 @@ def load_ppi():
     return train_adj_list, val_adj_list, test_adj_list, train_feat, val_feat, test_feat, train_labels, val_labels, test_labels, train_nodes, val_nodes, test_nodes
 
 
-def cal_knn(features):
-    knn_graph = kneighbors_graph(features.numpy(), n_neighbors=5, metric='cosine')
-    # knn_edge_index = knn_graph(features, k=2, loop=False, cosine=True)
+def cal_2hop_adj(args, adj):
+    os.makedirs('./2hop-dataset', exist_ok=True)
+    file = './2hop-dataset/{}.pt'.format(args.data)
+
+    if os.path.exists(file):
+       _2nd_adj = torch.load(file)
+    else:
+        dense_adj = adj.to_dense()
+        dense_2nd_adj = dense_adj @ dense_adj
+        _2nd_adj = ((dense_2nd_adj > 0.).to(torch.long) + dense_adj) == 1.
+        _2nd_adj = _2nd_adj.long()
+        torch.save(_2nd_adj, file)
+        
+    return _2nd_adj
+
+
+def cal_knn(features, knn_neighbors=5):
+    knn_graph = kneighbors_graph(features.numpy(), n_neighbors=knn_neighbors, metric='cosine')
     return knn_graph.toarray()
 
 
