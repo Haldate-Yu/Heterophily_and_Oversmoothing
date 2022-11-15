@@ -240,7 +240,10 @@ def train(datastr, splitstr):
         datastr, splitstr, args.row_normalized_adj, model_type=args.model, embedding_method=args.emb,
         get_degree=get_degree)
     if args.pinv is True:
-        adj_ectd = cal_mfpt(args, ori_adj, args.topk)
+        # using ectd
+        # adj_ectd = cal_mfpt(args, ori_adj, args.topk)
+        # using 2nd-only neighbors
+        adj_ectd = cal_2hop_adj(args, ori_adj)
         adj_knn = cal_knn(features)
 
         # ----- adjacency matrix addition ----- #
