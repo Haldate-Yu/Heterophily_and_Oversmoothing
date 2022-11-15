@@ -16,5 +16,3 @@ python -u full-supervised.py --data film --layer 2 --weight_decay 1e-3 --model G
 python -u full-supervised.py --data film --layer 2 --weight_decay 1e-3 --model GCNII --hidden 16 --dropout 0
 python -u full-supervised.py --data pubmed --layer 64 --alpha 0.1 --weight_decay 5e-6 --model GCNII
 python -u full-supervised.py --data pubmed --layer 64 --alpha 0.1 --weight_decay 5e-6 --variant --model GCNII
-
-
